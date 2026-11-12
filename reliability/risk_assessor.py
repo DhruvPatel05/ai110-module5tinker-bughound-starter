@@ -19,6 +19,9 @@ def assess_risk(
     reasons: List[str] = []
     score = 100
 
+    # ----------------------------
+    # No fix produced
+    # ----------------------------
     if not fixed_code.strip():
         return {
             "score": 0,
@@ -39,9 +42,11 @@ def assess_risk(
         if severity == "high":
             score -= 40
             reasons.append("High severity issue detected.")
+
         elif severity == "medium":
             score -= 20
             reasons.append("Medium severity issue detected.")
+
         elif severity == "low":
             score -= 5
             reasons.append("Low severity issue detected.")
@@ -80,7 +85,18 @@ def assess_risk(
     # ----------------------------
     # Auto-fix policy
     # ----------------------------
-    should_autofix = level == "low"
+    # PART 3 RELIABILITY CHANGE:
+    # A fix must not only be classified as low risk,
+    # but must also have a confidence/risk score of at least 90.
+    # Scores from 75-89 still count as "low" risk,
+    # but require human review instead of automatic application.
+    should_autofix = level == "low" and score >= 90
+
+    if level == "low" and score < 90:
+        reasons.append(
+            "Low-risk fix did not meet the stricter auto-fix threshold; "
+            "human review required."
+        )
 
     if not reasons:
         reasons.append("No significant risks detected.")
@@ -91,3 +107,4 @@ def assess_risk(
         "reasons": reasons,
         "should_autofix": should_autofix,
     }
+    

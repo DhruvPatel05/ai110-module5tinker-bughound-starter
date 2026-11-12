@@ -37,6 +37,32 @@ class BugHoundAgent:
     # ----------------------------
     def run(self, code_snippet: str) -> Dict[str, Any]:
         self.logs = []
+
+        # Guardrail: do not analyze or modify empty/comments-only input
+        meaningful_lines = [
+            line
+            for line in code_snippet.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        if not meaningful_lines:
+            self._log(
+                "PLAN",
+                "No executable code detected. Human review required."
+            )
+
+            return {
+                "issues": [],
+                "fixed_code": code_snippet,
+                "risk": {
+                    "score": 0,
+                    "level": "high",
+                    "reasons": ["No executable code was provided."],
+                    "should_autofix": False,
+                },
+                "logs": self.logs,
+            }
+
         self._log("PLAN", "Planning a quick scan + fix proposal workflow.")
 
         issues = self.analyze(code_snippet)
@@ -46,13 +72,28 @@ class BugHoundAgent:
         if fixed_code.strip() == "":
             self._log("ACT", "No fix produced (refused, error, or empty output).")
 
-        risk = assess_risk(original_code=code_snippet, fixed_code=fixed_code, issues=issues)
-        self._log("TEST", f"Risk assessed as {risk.get('level', 'unknown')} (score={risk.get('score', '-')}).")
+        risk = assess_risk(
+            original_code=code_snippet,
+            fixed_code=fixed_code,
+            issues=issues,
+        )
+
+        self._log(
+            "TEST",
+            f"Risk assessed as {risk.get('level', 'unknown')} "
+            f"(score={risk.get('score', '-')})."
+        )
 
         if risk.get("should_autofix"):
-            self._log("REFLECT", "Fix appears safe enough to auto-apply under current policy.")
+            self._log(
+                "REFLECT",
+                "Fix appears safe enough to auto-apply under current policy."
+            )
         else:
-            self._log("REFLECT", "Fix is not safe enough to auto-apply. Human review recommended.")
+            self._log(
+                "REFLECT",
+                "Fix is not safe enough to auto-apply. Human review recommended."
+            )
 
         return {
             "issues": issues,
@@ -187,18 +228,34 @@ class BugHoundAgent:
 
         return None
 
-    def _normalize_issues(self, arr: List[Any]) -> List[Dict[str, str]]:
+    def _normalize_issues(self, arr: List[Any]) -> Optional[List[Dict[str, str]]]:
         issues: List[Dict[str, str]] = []
+        valid_severities = {"Low", "Medium", "High"}
+
         for item in arr:
             if not isinstance(item, dict):
-                continue
+                return None
+
+            # Guardrail: require all expected fields
+            if not all(key in item for key in ("type", "severity", "msg")):
+                return None
+
+            issue_type = str(item["type"]).strip()
+            severity = str(item["severity"]).strip()
+            msg = str(item["msg"]).strip()
+
+            # Guardrail: reject incomplete or invalid issue data
+            if not issue_type or not msg or severity not in valid_severities:
+                return None
+
             issues.append(
                 {
-                    "type": str(item.get("type", "Issue")),
-                    "severity": str(item.get("severity", "Unknown")),
-                    "msg": str(item.get("msg", "")).strip(),
+                    "type": issue_type,
+                    "severity": severity,
+                    "msg": msg,
                 }
             )
+
         return issues
 
     def _try_json_loads(self, s: str) -> Any:
